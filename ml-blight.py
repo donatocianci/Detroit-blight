@@ -49,8 +49,10 @@ def get_time_features(index,label_flag, data):
 	data[label_flag+'_weekday'] = datetime.weekday
 	data.drop(columns = index, inplace = True)
 
-get_time_features('ticket_issued_date', 'issued', blight_data)
-get_time_features('hearing_date', 'hearing', blight_data)
+	return data
+
+blight_data = get_time_features('ticket_issued_date', 'issued', blight_data)
+blight_data = get_time_features('hearing_date', 'hearing', blight_data)
 
 
 
@@ -63,23 +65,46 @@ def standardize_text(index, data):
 
 	data[ index ] = standard
 
+	return data
 
-standardize_text('agency_name', blight_data)
-standardize_text('inspector_name', blight_data)
-standardize_text('violator_name', blight_data)
+blight_data = standardize_text('agency_name', blight_data)
+blight_data = standardize_text('inspector_name', blight_data)
+blight_data = standardize_text('violator_name', blight_data)
+
+#change `neighborhood city halls` to `department of public works` in `agency_name` feature
+index_ = blight_data[blight_data['agency_name']=='neighborhood city halls'].index[0]
+blight_data.at[index_, 'agency_name'] = 'department of public works'
+
+#bin infrequenct violation codes into an `other` category
+codes_to_keep = blight_data['violation_code'].value_counts().sort_values()[-14:].index.values
+blight_data['violation_code'] = blight_data['violation_code'].apply(lambda x: x if x in codes_to_keep else 'other' )
 
 
+#for inspectors that gave out more than 200 tickets, replace the `inspector_name` feature with 
+#that inspectors percent compliance. For inspectors who gave out at most 200 tickets, just 
+#replace their compliance percentage with the compliance percentage of all tickets.
+val_counts =  blight_data['inspector_name'].value_counts()
+grouping = blight_data.groupby('inspector_name')
+
+inspector_compliance_perc = grouping['compliance'].mean()
+blight_data['inspector_perc_success'] = blight_data['inspector_name'].apply(lambda x: inspector_compliance_perc.loc[x] if (val_counts.loc[x]>200) else 0.07)
+blight_data.drop(columns = 'inspector_name', inplace = True)
+
+
+#use count encoding to replace `violator_name` feature with the count of violations from that 
+#particular violator. 
+val_counts =  blight_data['violator_name'].value_counts()
+
+blight_data['violator_count'] = blight_data['violator_name'].apply(lambda x: val_counts.loc[x])
+blight_data.drop(columns = 'violator_name', inplace = True)
 
 
 X = blight_data.drop(labels= 'compliance', axis  = 1)
 Y = blight_data['compliance']
 
+#use one-hot encoding for `agency_name` and `disposition`. 
+X = pd.get_dummies(X, columns = ['agency_name', 'disposition','violation_code'])
 
-from sklearn.preprocessing import OrdinalEncoder
-
-enc = OrdinalEncoder()
-fit_data = enc.fit_transform(X[['disposition','violation_code','inspector_name','violator_name','agency_name']])
-X[['disposition','violation_code','inspector_name','violator_name','agency_name']] = fit_data
 
 
 print("End preprocessing, doing grid search for best parameters...")
@@ -100,3 +125,6 @@ grid_data = pd.DataFrame(roc_grid.cv_results_)
 mean_test_scores = grid_data.set_index('params')['mean_test_score']
 
 print(mean_test_scores.values.reshape(8,3))
+
+
+
